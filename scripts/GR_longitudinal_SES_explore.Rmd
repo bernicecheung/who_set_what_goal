@@ -1,0 +1,230 @@
+---
+title: "GR_longitudinal_SES_explore"
+author: "Bernice Cheung"
+date: "11/3/2022"
+output:
+  html_document:
+    code_folding: hide
+    toc: true
+    toc_float: true
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r libraries, echo=FALSE,warning=FALSE,message=FALSE}
+library(tidyverse)
+library(psych)
+library(ggplot2)
+library(janitor)
+library(kableExtra)
+library(here)
+library(lme4)
+```
+
+load data:  
+845 goals from 246 participants; 194 variables
+```{r}
+complete_df_goal <- read.csv(here("inputs", "longitudinal_merged_allTime_w.csv"))
+indivDiff_df_sub <- read.csv(here("inputs", "indivDiffDf.csv"))
+demo_df_sub <- read.csv(here("inputs", "demoDf.csv"))
+sub_df <- read.csv(here("inputs", "wideDf.csv"))
+```
+
+transform demographic variable (factors)
+```{r}
+demo_df_sub <- demo_df_sub %>%
+  mutate(gender = recode(gender, `1` = "Male", `2` = "Female"), 
+         race = recode(race, `1` = "American Indian or Alaska Native", `2` = "Asian", `3` = "Black or African American", `5` = "White", `6` = NA_character_, `7` = NA_character_, `1,5` = "Mixed", `2,5` = "Mixed", `3,5` = "Mixed"),
+         ethnicity = recode(ethnicity, `1` = "Hispanic or Latino", `2` = "Not Hispanic or Latino", `3` = NA_character_), 
+         education = recode(education, `1` = "Primary School", `2` = "High School", `3` = "Associate's Degree", `4` = "Bachelor's Degree",`5` = "Master's Degree",`6` = "MBA/JD",`7` = "Doctoral PhD/MD"), 
+         marital_status = recode(marital_status, `1` = "Single, never married", `2` = "Married or domestic partnership", `3` = "Widowed", `4` = "Divorced", `5` = "Separated"), 
+         income_f = recode(income, `1` = "Less than $25,000", `2` = "$25,000 to $34,999l", `3` = "$35,000 to $49,999", `4` = "$50,000 to $74,999",`5` = "$75,000 to $99,999",`6` = "$100,000 to $149,999",`7` = "$150,000 or more")
+         )
+```
+
+merge individual level data
+```{r}
+indiv_df <- indivDiff_df_sub %>%
+  left_join(demo_df_sub, by = "MTurkCode") %>%
+  left_join(select(sub_df, MTurkCode, listNum), by = "MTurkCode")
+```
+
+
+
+# Descriptive of demographic information
+
+age
+```{r}
+demo_df_sub %>%
+  ggplot() + 
+  geom_histogram(aes(x = age), fill = 'darkorange', color = 'black') + 
+  geom_vline(aes(xintercept=mean(age)),  linetype="dashed")
+  
+```
+
+gender
+```{r}
+library(RColorBrewer)
+my_palette <- brewer.pal(7, "Spectral")
+
+demo_df_sub %>%
+  ggplot() + 
+  geom_bar(aes(x = gender, fill = gender)) + 
+  scale_fill_manual(values = my_palette)
+```
+
+race
+```{r}
+
+demo_df_sub %>%
+  ggplot() + 
+  geom_bar(aes(x = race, fill = race)) + 
+  scale_fill_manual(values = my_palette) + 
+  theme(axis.text.x = element_text(angle=45))
+```
+
+education
+```{r}
+demo_df_sub %>%
+  ggplot() + 
+  geom_bar(aes(x = education, fill = education)) + 
+  scale_fill_manual(values = my_palette) + 
+  theme(axis.text.x = element_text(angle=45))
+```
+
+annual household income
+```{r}
+demo_df_sub %>%
+  ggplot() + 
+  geom_bar(aes(x = income_f, fill = income_f)) + 
+  scale_fill_manual(values = my_palette) + 
+  theme(axis.text.x = element_text(angle=45))
+  
+```
+
+subjective SES
+```{r}
+demo_df_sub %>%
+  ggplot() + 
+  geom_histogram(aes(x = subjectiveSES), fill = "darkorange") + 
+  scale_x_continuous(breaks=seq(0, 10, by = 1)) + 
+  geom_vline(aes(xintercept=mean(subjectiveSES)),  linetype="dashed")
+```
+
+# Subjective SES & Goal Characteristics
+
+## Number of goals
+
+```{r}
+ggplot(data = indiv_df,
+       mapping = aes(x = subjectiveSES, 
+                     y = listNum,
+                     color = gender)) +
+  geom_point(alpha = .3,
+             size = 3) +
+  geom_smooth(method = "lm", 
+              se = FALSE, 
+              size = 1.5) +
+  ylim(1,5) + 
+  scale_x_continuous(breaks = seq(1, 10, 1)) +
+  scale_y_continuous(breaks = seq(1, 5, 5)) +
+  scale_color_manual(values = c("darkorange", 
+                                "cornflowerblue"))
+```
+
+```{r}
+ml_ses_listNum <- lm(listNum ~ subjectiveSES*gender, data = indiv_df)
+summary(ml_ses_listNum)
+```
+
+## Goal Content
+
+Aggregate subjective level goal content
+```{r}
+content_df_sub <- complete_df_goal %>%
+  select(MTurkCode, content) %>%
+  group_by(MTurkCode) %>%
+  summarise(finance_n = sum(content == "finance"), 
+            health_n = sum(content == "physical health"))
+
+indiv_df <- indiv_df %>%
+  left_join(content_df_sub, by = "MTurkCode") %>%
+  mutate(finance_bi = case_when(finance_n > 0 ~ TRUE,
+                                TRUE ~ FALSE), 
+         health_bi = case_when(health_n > 0 ~ TRUE,
+                                TRUE ~ FALSE), 
+        finance_perc = finance_n/listNum, 
+        health_perc = health_n/listNum)
+
+```
+
+### Financial goals
+
+```{r}
+table(indiv_df$finance_bi)
+```
+
+```{r}
+t.test(subjectiveSES ~ finance_bi, data = indiv_df, var.equal = FALSE)
+```
+
+```{r}
+ml_ses_finance <- lm(finance_perc ~ subjectiveSES*gender, data = indiv_df)
+summary(ml_ses_finance)
+```
+
+```{r}
+
+ggplot(data = indiv_df,
+       mapping = aes(x = subjectiveSES, 
+                     y = finance_perc,
+                     color = gender)) +
+  geom_point(alpha = .3,
+             size = 3) +
+  geom_smooth(method = "lm", 
+              se = FALSE, 
+              size = 1.5) +
+  ylim(1,5) + 
+  scale_x_continuous(breaks = seq(1, 10, 1)) +
+  scale_y_continuous(breaks = seq(0, 1, 0.2)) +
+  scale_color_manual(values = c("darkorange", 
+                                "cornflowerblue"))
+```
+
+### Health goals
+
+
+```{r}
+t.test(subjectiveSES ~ health_bi, data = indiv_df, var.equal = FALSE)
+```
+
+```{r}
+ml_ses_health <- lm(health_perc ~ subjectiveSES*gender, data = indiv_df)
+summary(ml_ses_health)
+```
+
+```{r}
+
+ggplot(data = indiv_df,
+       mapping = aes(x = subjectiveSES, 
+                     y = health_perc,
+                     color = gender)) +
+  geom_point(alpha = .3,
+             size = 3) +
+  geom_smooth(method = "lm", 
+              se = FALSE, 
+              size = 1.5) +
+  ylim(1,5) + 
+  scale_x_continuous(breaks = seq(1, 10, 1)) +
+  scale_y_continuous(breaks = seq(0, 1, 0.2)) +
+  scale_color_manual(values = c("darkorange", 
+                                "cornflowerblue"))
+```
+
+```{r}
+
+```
+
